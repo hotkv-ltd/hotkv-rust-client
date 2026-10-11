@@ -1,0 +1,89 @@
+name: Publish
+
+# Pushing a tag such as v1.0.0 verifies the crate and publishes it to
+# crates.io. Running the workflow by hand defaults to a dry run: it does
+# everything except the final upload.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Verify and package only; do not publish to crates.io
+        type: boolean
+        default: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Verify and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # A tag push publishes; a manual run publishes only when dry_run is unchecked.
+      PUBLISH: ${{ github.event_name == 'push' || inputs.dry_run == false }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-publish-${{ hashFiles('Cargo.toml') }}
+
+      - name: Check the version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "hotkv-client") | .version')
+          echo "crate version: $version"
+          if [ "$REF_TYPE" = "tag" ]; then
+            if [ "$REF_NAME" != "v$version" ]; then
+              echo "::error::tag $REF_NAME does not match the crate version v$version in Cargo.toml"
+              exit 1
+            fi
+          elif [ "$PUBLISH" = "true" ]; then
+            echo "::error::publishing needs a tag ref (v$version), not $REF_NAME"
+            exit 1
+          else
+            echo "not a tag ref ($REF_NAME): dry run, skipping the tag check"
+          fi
+
+      - name: Build (default features)
+        run: cargo build --all-targets
+
+      - name: Build (tls feature)
+        run: cargo build --all-targets --features tls
+
+      - name: Unit tests
+        run: cargo test --lib
+
+      - name: Doc tests
+        run: cargo test --doc
+
+      - name: Wire argument and float format tests (no server needed)
+        run: cargo test --test wire_args --test floats --test cluster_fake
+
+      - name: List the files in the package
+        run: cargo package --list
+
+      - name: Publish dry run
+        run: cargo publish --dry-run
+
+      - name: Publish to crates.io
+        if: env.PUBLISH == 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish

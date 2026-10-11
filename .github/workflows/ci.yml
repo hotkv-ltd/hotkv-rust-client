@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build, lint and unit test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.toml') }}
+
+      - name: Build (default features)
+        run: cargo build --all-targets
+
+      - name: Build (tls feature)
+        run: cargo build --all-targets --features tls
+
+      - name: Clippy (default features)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Clippy (tls feature)
+        run: cargo clippy --all-targets --features tls -- -D warnings
+
+      - name: Unit tests
+        run: cargo test --lib
+
+      - name: Doc tests
+        run: cargo test --doc
+
+      - name: Wire argument and float format tests (no server needed)
+        run: cargo test --test wire_args --test floats --test cluster_fake
+
+      - name: Package check
+        run: cargo package --allow-dirty --no-verify
+
+  integration:
+    name: Integration tests (needs a live HotKV server)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Disabled by default: this job needs a HotKV server binary or image,
+    # which is not available in this public workflow. To run it, provide
+    # one (a container image, a downloaded release, or a build step) that
+    # listens on 127.0.0.1:6379, remove this condition, and uncomment the
+    # step below.
+    if: false
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # - name: Start a HotKV server
+      #   run: |
+      #     # e.g. docker run -d -p 6379:6379 hotkv/hotkv:latest
+      #     # or download and run a release binary, then wait for it to
+      #     # accept connections before the next step.
+
+      - name: Run integration tests
+        env:
+          HOTKV_TEST_URL: hotkv://127.0.0.1:6379
+        run: cargo test
+
+  # To run the integration suite locally against a HotKV server you already
+  # have running:
+  #   export HOTKV_TEST_URL=hotkv://127.0.0.1:6379
+  #   cargo test
+  # The README's Testing section lists the extra variables that enable the
+  # authentication, TLS and cluster suites.
