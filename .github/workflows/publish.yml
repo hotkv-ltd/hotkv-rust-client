@@ -28,7 +28,7 @@ jobs:
       # A tag push publishes; a manual run publishes only when dry_run is unchecked.
       PUBLISH: ${{ github.event_name == 'push' || inputs.dry_run == false }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
